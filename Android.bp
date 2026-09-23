@@ -1,0 +1,69 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "bluetooth.audio.core.service",
+
+    vendor: true,
+    relative_install_path: "hw",
+    compile_multilib: "32",
+
+    srcs: [
+        "core/src/main.cpp",
+    ],
+
+    defaults: [
+        "latest_android_media_audio_common_types_ndk_static",
+        "latest_android_hardware_audio_common_ndk_static",
+        "latest_android_hardware_audio_core_ndk_shared",
+        "latest_android_hardware_audio_core_sounddose_ndk_static",
+        "latest_android_hardware_bluetooth_audio_ndk_static",
+    ],
+
+    static_libs: [
+        "libaudioserviceexampleimpl",
+    ],
+
+    shared_libs: [
+        "libalsautilsv2",
+        "libaudio_aidl_conversion_common_ndk",
+        "libaudioaidlcommon",
+        "libaudioutils",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "libnbaio_mono",
+        "liblog",
+        "libmedia_helper",
+        "libstagefright_foundation",
+        "libtinyalsav2",
+        "libutils",
+        "libxml2",
+        "libbluetooth_audio_session_aidl",
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
+    ],
+
+    header_libs: [
+        "libaudio_system_headers",
+        "libaudioaidl_headers",
+        "libxsdc-utils",
+    ],
+
+    init_rc: [
+        "core/init/bluetooth.audio.core.service.rc",
+    ],
+
+    vintf_fragments: [
+        "core/vintf/bluetooth.audio.core.xml",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-DBACKEND_NDK",
+    ],
+}

@@ -1,0 +1,10 @@
+service vendor.bluetooth-audio-core /vendor/bin/hw/bluetooth.audio.core.service
+    class hal
+    user audioserver
+    group audio bluetooth system
+    capabilities BLOCK_SUSPEND SYS_NICE
+    rlimit rtprio 10 10
+    ioprio rt 4
+    task_profiles ProcessCapacityHigh HighPerformance
+    interface aidl android.hardware.audio.core.IModule/bluetooth
+    disabled

@@ -1,0 +1,12 @@
+out/
+*.so
+*.o
+*.zip
+.DS_Store
+
+# Local build artifacts
+artifacts/
+bluetooth.audio.core.service
+*.o
+*.a
+Android.bp.bak
