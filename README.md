@@ -149,7 +149,7 @@ An experimental VINTF fragment, init service and LE Audio policy configuration a
 - Pixel Watch 4 executable loading: working
 - Runtime library compatibility: verified
 - ModuleBluetooth initialization: working
-- Existing Bluetooth AIDL provider reuse: working
+- Existing Bluetooth AIDL provider reuse: configured
 - Binder registration from ADB shell: blocked by SELinux
 - Device VINTF integration: missing on production firmware
 - BLE headset input exposure: not yet testable
