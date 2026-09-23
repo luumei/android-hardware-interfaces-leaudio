@@ -1,189 +1,355 @@
-# Android Audio Core Bluetooth HAL Bridge
+# Pixel Watch 4 LE Audio Bluetooth Audio Core Bridge
 
-Experimental AOSP-derived Android Audio Core Bluetooth HAL bridge for exposing Bluetooth / LE Audio through:
+Experimental Android Audio Core Bluetooth HAL bridge for exposing LE Audio
+input/output through:
 
+~~~text
 android.hardware.audio.core.IModule/bluetooth
+~~~
 
-The project was created while investigating LE Audio input support on the Google Pixel Watch 4.
+The project was developed while investigating LE Audio input on a Google
+Pixel Watch 4 with Samsung Galaxy Buds3 Pro.
 
-## Pixel Watch 4 test device
+## Tested device
+
+Current development target:
 
 - Google Pixel Watch 4 Wi-Fi
-- Device: kenari_btwifi
+- Device codename: `kenari_btwifi`
 - Android 17
-- Build: CP3A.260905.002
-- Samsung Galaxy Buds3 Pro
+- Tested build: `CP3A.260905.002`
+- Earbuds: Samsung Galaxy Buds3 Pro
 
-## Findings
+This patchset is specifically based on the firmware and vendor configuration
+observed on that build. Other builds or devices may use a different audio HAL
+layout.
 
-The Pixel Watch 4 successfully establishes LE Audio and exposes:
+## Problem
 
-android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default
+On the tested Pixel Watch 4 firmware, the Bluetooth LE Audio profile itself
+connects successfully.
 
-The Bluetooth Audio provider is declared as AIDL version 3.
+Observed through `dumpsys bluetooth_manager`:
 
-However, the shipping device VINTF configuration does not expose:
+- LE Audio connected
+- Buds3 Pro active as LE Audio device
+- LE Audio used for the active Bluetooth audio path
+- `IBluetoothAudioProviderFactory/default` is available
 
+However, Android Audio Core does not expose:
+
+~~~text
 android.hardware.audio.core.IModule/bluetooth
+~~~
 
-The Audio Core V4 device manifest contains:
+and AudioPolicy does not instantiate BLE headset input/output devices.
 
-- IModule/default
-- IModule/r_submix
-- IModule/usb
+As a result, applications do not receive a normal:
 
-but not:
+~~~text
+AudioDeviceInfo.TYPE_BLE_HEADSET
+~~~
 
-- IModule/bluetooth
+input device from the Buds.
 
-The installed Android framework compatibility matrices explicitly include the bluetooth IModule instance.
+The production firmware instead exposes only the built-in watch microphone
+and legacy/SCO-style Bluetooth input paths to applications.
 
-## Runtime proof
+## Vendor hook found on Pixel Watch 4
 
-An ARM32 Audio Core Bluetooth bridge was built and executed on a production Pixel Watch 4.
+The Qualcomm vendor audio configuration contains an optional Bluetooth audio
+plugin entry similar to:
 
-Observed log:
+~~~xml
+<library
+    name="btaudio_sw"
+    libraryName="android.hardware.bluetooth.audio_sw.so"
+    method="registerIModuleBluetoothSWQti"
+    mandatory="false" />
+~~~
 
-    Android Bluetooth Audio Core HAL starting
-    Using existing IBluetoothAudioProviderFactory/default
-    Failed to register android.hardware.audio.core.IModule/bluetooth, binder status=-1
+The referenced shared library is not present on the tested production
+firmware.
 
-This proves that the bridge:
+This repository implements a compatible plugin entry point:
 
-- loads on the Pixel Watch 4
-- resolves its runtime dependencies
-- creates ModuleBluetooth
-- reaches the existing Bluetooth Audio provider
-- reaches Binder service registration
+~~~text
+registerIModuleBluetoothSWQti
+~~~
 
-Registration from ADB fails because the process runs in the shell SELinux domain.
+which creates and registers:
 
-The binary was rebuilt using `scripts/build_pixel_watch_manual.sh`, and the rebuilt binary reproduced the same runtime behavior on the Pixel Watch 4.
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
 
-Observed denial:
+## Architecture
 
-    avc: denied { add }
-    scontext=u:r:shell:s0
-    tcontext=u:object_r:hal_audio_service:s0
-    tclass=service_manager
-    permissive=0
+Intended integration path:
 
-The shipping Qualcomm Audio HAL runs instead as:
+~~~text
+Galaxy Buds3 Pro
+        |
+        v
+Android Bluetooth LE Audio stack
+        |
+        v
+IBluetoothAudioProviderFactory/default
+        |
+        v
+android.hardware.bluetooth.audio_sw.so
+        |
+        v
+registerIModuleBluetoothSWQti()
+        |
+        v
+android.hardware.audio.core.IModule/bluetooth
+        |
+        +--> BLE Headset Out
+        +--> BLE Speaker Out
+        +--> BLE Headset In
+~~~
 
-    u:r:hal_audio_default:s0
+The bridge uses the existing Bluetooth Audio Provider Factory already present
+on the system rather than creating a second provider implementation.
 
-## Missing integration
+## LE Audio configuration patch
 
-Current observed path:
+The patch in:
 
-    Bluetooth / LE Audio stack
-              |
-              v
-    IBluetoothAudioProviderFactory/default
-              |
-              v
-    IModule/bluetooth                 MISSING
-              |
-              v
-    AudioPolicy BLE devices           MISSING
-              |
-              v
-    AudioRecord / AudioTrack
+~~~text
+patches/0001-add-le-audio-ports.patch
+~~~
 
-The production Pixel Watch 4 configuration also does not expose the required BLE AudioPolicy device ports, including:
+extends the AOSP Bluetooth Audio Core example configuration with LE Audio
+device ports and routes.
 
-- AUDIO_DEVICE_OUT_BLE_HEADSET
-- AUDIO_DEVICE_OUT_BLE_SPEAKER
-- AUDIO_DEVICE_IN_BLE_HEADSET
+Added device ports:
 
-The existing Qualcomm bluetooth_qti AudioPolicy configuration contains classic A2DP and Hearing Aid ports, but no BLE_HEADSET input path.
+~~~text
+BLE Headset Out
+BLE Speaker Out
+BLE Headset In
+~~~
 
-## Bridge modification
+Added mix ports:
 
-The AOSP reference ModuleBluetooth implementation normally creates a Bluetooth Audio provider in-process.
+~~~text
+le audio output
+le audio input
+~~~
 
-The Pixel Watch 4 already provides:
+The BLE input profile advertises both mono and stereo PCM channel layouts.
 
-android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default
+That makes two-channel input possible at the Audio Core configuration level.
 
-Therefore this project changes ModuleBluetooth to use the existing provider instead of creating a second provider.
+It does **not** by itself prove that the Samsung Galaxy Buds3 Pro deliver two
+independent left/right microphone PCM streams to Android. That still requires
+runtime verification on an integrated vendor/test build.
 
-The relevant behavior is:
+## VINTF
 
-    ModuleBluetooth::ModuleBluetooth(
-            std::unique_ptr<Module::Configuration>&& config)
-        : Module(Type::BLUETOOTH, std::move(config)) {
-        LOG(INFO) << "Using existing IBluetoothAudioProviderFactory/default";
-    }
+The repository contains:
 
-## Required system integration
+~~~text
+integration/pixel-watch-4/manifest_bluetooth_audio_core.xml
+~~~
 
-A complete device integration requires at least:
+which declares:
 
-1. android.hardware.audio.core.IModule/bluetooth
-2. Audio Core V4 vendor VINTF declaration
-3. init service running in the appropriate Audio HAL SELinux domain
-4. BLE AudioPolicy input/output ports
-5. AUDIO_DEVICE_IN_BLE_HEADSET routing
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
 
-An experimental VINTF fragment, init service and LE Audio policy configuration are included in this repository.
+for Audio Core AIDL version 4.
 
-## Project layout
+## Plugin source
 
-    core/
-      src/
-      init/
-      vintf/
-      policy/
+Plugin entry point:
 
-    configs/
-      generic-aidl-v4/
-      pixel-watch-4/
+~~~text
+plugin/src/register.cpp
+~~~
 
-    docs/
-    scripts/
+The exported function is:
+
+~~~text
+registerIModuleBluetoothSWQti
+~~~
+
+matching the function name expected by the Pixel Watch Qualcomm vendor audio
+configuration.
+
+## Building
+
+A manual ARM32 build helper is included:
+
+~~~text
+scripts/build_plugin_full_manual.sh
+~~~
+
+The tested Pixel Watch 4 userspace is 32-bit ARM, so the generated plugin must
+be an ARM32 shared library.
+
+Expected output:
+
+~~~text
+android.hardware.bluetooth.audio_sw.so
+~~~
+
+The binary itself is intentionally not committed to this repository.
+
+A successful build should contain:
+
+~~~text
+registerIModuleBluetoothSWQti
+
+BLE Headset Out
+BLE Speaker Out
+BLE Headset In
+le audio output
+le audio input
+~~~
+
+Example verification:
+
+~~~bash
+file android.hardware.bluetooth.audio_sw.so
+
+readelf -Ws android.hardware.bluetooth.audio_sw.so \
+  | grep registerIModuleBluetoothSWQti
+
+strings android.hardware.bluetooth.audio_sw.so \
+  | grep -E 'BLE Headset Out|BLE Headset In|BLE Speaker Out|le audio input|le audio output'
+~~~
+
+One locally tested build produced:
+
+~~~text
+SHA256:
+53c35e4afd0d1956322693ca4b0f5cf5bd33382c39b71edac4e83af6bff0cc9d
+~~~
+
+This hash is provided only as a reference for that build.
+
+## Expected vendor integration
+
+For a Pixel Watch 4 vendor/test build, the plugin is intended to be installed
+as:
+
+~~~text
+/vendor/lib/hw/android.hardware.bluetooth.audio_sw.so
+~~~
+
+The existing Qualcomm audio HAL loader can then load the library and resolve:
+
+~~~text
+registerIModuleBluetoothSWQti
+~~~
+
+The exact installation and SELinux policy must be integrated into the device
+build. A locked production watch cannot normally replace files under
+`/vendor`.
+
+## SELinux
+
+A standalone shell-side test successfully loaded the plugin and resolved the
+exported function, but service registration from the `shell` SELinux domain
+was denied.
+
+That does not demonstrate that the intended vendor integration will fail.
+
+The intended execution context is the vendor audio HAL process, not `shell`.
+
+Additional SELinux rules should only be added when an integrated device build
+produces a specific AVC denial. Broad permissive rules are intentionally not
+included.
+
+## Runtime success criteria
+
+### 1. Audio Core Bluetooth module
+
+~~~bash
+adb shell "service list | grep android.hardware.audio.core.IModule"
+~~~
+
+Expected:
+
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
+
+### 2. BLE AudioPolicy devices
+
+~~~bash
+adb shell "dumpsys media.audio_policy | grep -i -E 'BLE_HEADSET|BLE Headset|BLE Speaker|le audio'"
+~~~
+
+Expected BLE input/output ports should become visible.
+
+### 3. Application device enumeration
+
+A Wear OS application should see:
+
+~~~text
+AudioDeviceInfo.TYPE_BLE_HEADSET
+~~~
+
+for the Bluetooth input path.
+
+### 4. Stereo capability
+
+Check whether `channelCounts` contains:
+
+~~~text
+2
+~~~
+
+for the BLE headset input.
+
+### 5. Actual left/right microphone separation
+
+Finally record two-channel PCM and verify that the left and right channels are
+actually different signals.
+
+A stereo channel declaration alone is not proof that the earbuds expose two
+independent microphone streams.
 
 ## Current status
 
-- ARM32 bridge compilation: working
-- Pixel Watch 4 executable loading: working
-- Runtime library compatibility: verified
-- ModuleBluetooth initialization: working
-- Existing Bluetooth AIDL provider reuse: configured
-- Binder registration from ADB shell: blocked by SELinux
-- Device VINTF integration: missing on production firmware
-- BLE headset input exposure: not yet testable
-- Stereo L/R microphone PCM validation: not yet testable
+Verified:
 
-## Goal
+- LE Audio profile connects on Pixel Watch 4
+- Galaxy Buds3 Pro become the active LE Audio Bluetooth device
+- Bluetooth Audio Provider Factory exists
+- production firmware does not expose `IModule/bluetooth`
+- Qualcomm vendor configuration contains an optional plugin hook
+- bridge plugin builds successfully as ARM32
+- `registerIModuleBluetoothSWQti` is exported
+- BLE input/output configuration is included in the built plugin
+- stereo input is declared by the patched Audio Core configuration
 
-The next milestone is to run the bridge as a properly integrated Audio HAL service.
+Not yet verified on an integrated vendor build:
 
-If integration succeeds, the tests are:
+- successful registration of `IModule/bluetooth` inside the vendor audio HAL
+  process
+- creation of BLE headset AudioPolicy devices
+- Android application access to `TYPE_BLE_HEADSET`
+- two-channel `AudioRecord`
+- independent left/right Buds3 Pro microphone PCM
 
-1. android.hardware.audio.core.IModule/bluetooth registers successfully
-2. AUDIO_DEVICE_IN_BLE_HEADSET is instantiated
-3. Android exposes TYPE_BLE_HEADSET to applications
-4. channelCounts includes 2
-5. AudioRecord can capture the Bluetooth LE Audio input
-6. left and right earbud microphones are verified as distinct PCM channels
+## Purpose
 
-## Pixel Watch 4 test binary
+The immediate motivation for this work is a low-latency hearing-assistance
+application that can process Bluetooth earbud microphone audio in real time.
 
-A locally built ARM32 test binary has already been executed successfully on the watch up to Binder service registration.
+The bridge itself is generic and is not limited to that application.
 
-Known SHA-256:
+## Disclaimer
 
-    7ee7f2ba4a8b85e92912b67684e7535425272eae4032a4bc0dab4796c309bca0
+This is experimental development work.
 
-Build artifacts are intentionally excluded from this repository.
+It modifies the Android vendor audio integration path and is not an official
+Google, Qualcomm, Samsung, or AOSP component.
 
-## Important
-
-This project is experimental interoperability research.
-
-No proprietary Google, Qualcomm or Samsung vendor binaries are included in this repository.
-
-## License
-
-See LICENSE.
+Do not flash binaries or vendor images built for a different device or build.
