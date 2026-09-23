@@ -353,3 +353,180 @@ It modifies the Android vendor audio integration path and is not an official
 Google, Qualcomm, Samsung, or AOSP component.
 
 Do not flash binaries or vendor images built for a different device or build.
+
+## Pixel Watch 4 production firmware findings
+
+The following behavior was verified directly on the tested Pixel Watch 4
+production firmware.
+
+### Audio Core VINTF
+
+The installed Audio Core VINTF manifest declares:
+
+~~~text
+IConfig/default
+IModule/default
+IModule/r_submix
+IModule/usb
+~~~
+
+It does **not** declare:
+
+~~~text
+IModule/bluetooth
+~~~
+
+The relevant production manifest is:
+
+~~~text
+/vendor/etc/vintf/manifest/manifest_audiocorehal_default.xml
+~~~
+
+### Registered services
+
+The running system exposes:
+
+~~~text
+android.hardware.audio.core.IModule/default
+android.hardware.audio.core.IModule/r_submix
+android.hardware.audio.core.IModule/usb
+android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default
+~~~
+
+but no:
+
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
+
+This is consistent with the missing Bluetooth Audio Core VINTF declaration.
+
+### Qualcomm vendor plugin hook
+
+The production Qualcomm vendor audio configuration contains:
+
+~~~xml
+<library name="btaudio_sw"
+         libraryName="android.hardware.bluetooth.audio_sw.so"
+         method="registerIModuleBluetoothSWQti"
+         mandatory="false" />
+~~~
+
+The configuration file is:
+
+~~~text
+/vendor/etc/audio/sku_monaco/vendor_audio_interfaces.xml
+~~~
+
+The referenced plugin:
+
+~~~text
+android.hardware.bluetooth.audio_sw.so
+~~~
+
+is not present on the tested production firmware.
+
+The `mandatory="false"` attribute allows the vendor audio HAL to start even
+when this optional Bluetooth Audio Core plugin is absent.
+
+### Audio HAL process
+
+The production service runs as:
+
+~~~text
+audiohalservice.qti
+~~~
+
+under the SELinux domain:
+
+~~~text
+u:r:hal_audio_default:s0
+~~~
+
+The corresponding init service is:
+
+~~~text
+vendor.audio-hal-aidl
+~~~
+
+and runs:
+
+~~~text
+/vendor/bin/hw/audiohalservice.qti
+~~~
+
+### Confirmed integration gap
+
+The production firmware therefore already contains:
+
+~~~text
+Bluetooth LE Audio stack
+        |
+        v
+IBluetoothAudioProviderFactory/default
+        |
+        v
+Qualcomm vendor audio HAL
+        |
+        v
+optional btaudio_sw plugin hook
+~~~
+
+but is missing both:
+
+~~~text
+android.hardware.bluetooth.audio_sw.so
+~~~
+
+and:
+
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
+
+from the device VINTF manifest.
+
+This repository supplies source for the missing plugin and a matching VINTF
+fragment.
+
+### Expected integration sequence
+
+A vendor/test build should integrate the bridge in this order:
+
+~~~text
+1. Install android.hardware.bluetooth.audio_sw.so
+2. Declare IModule/bluetooth in device VINTF
+3. Start audiohalservice.qti
+4. Qualcomm loader reads vendor_audio_interfaces.xml
+5. Loader resolves registerIModuleBluetoothSWQti()
+6. Plugin registers IModule/bluetooth
+7. AudioFlinger discovers the declared Bluetooth Audio Core module
+8. AudioPolicy receives the BLE headset ports and routes
+~~~
+
+The intended plugin location for the tested 32-bit userspace is expected to
+be under the vendor library path used by the Qualcomm loader, for example:
+
+~~~text
+/vendor/lib/hw/android.hardware.bluetooth.audio_sw.so
+~~~
+
+The exact final installation path should be confirmed from the device build
+rules used by Google/Qualcomm.
+
+### Remaining runtime validation
+
+After integration, the following still need to be verified on-device:
+
+~~~text
+IModule/bluetooth appears in service list
+AUDIO_DEVICE_OUT_BLE_HEADSET is instantiated
+AUDIO_DEVICE_IN_BLE_HEADSET is instantiated
+AudioDeviceInfo.TYPE_BLE_HEADSET becomes visible to apps
+channelCounts includes 2
+AudioRecord can open the BLE input
+left/right microphone PCM streams are actually distinct
+~~~
+
+The current production firmware cannot validate these final steps because the
+Bluetooth Audio Core plugin and VINTF instance are absent.
