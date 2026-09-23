@@ -1,0 +1,83 @@
+diff --git a/audio/aidl/default/Configuration.cpp b/audio/aidl/default/Configuration.cpp
+index 0ff8eb4e18..2f781abe1f 100644
+--- a/audio/aidl/default/Configuration.cpp
++++ b/audio/aidl/default/Configuration.cpp
+@@ -630,6 +630,19 @@ std::unique_ptr<Configuration> getBluetoothConfiguration() {
+                               {44100, 48000, 88200, 96000})};
+         const std::vector<AudioProfile> hearingAidAudioProfiles = {createProfile(
+                 PcmType::INT_16_BIT, {AudioChannelLayout::LAYOUT_STEREO}, {16000, 24000})};
++
++        const std::vector<AudioProfile> leAudioOutputProfiles = {
++                createProfile(PcmType::INT_16_BIT,
++                              {AudioChannelLayout::LAYOUT_MONO,
++                               AudioChannelLayout::LAYOUT_STEREO},
++                              {8000, 16000, 24000, 32000, 44100, 48000})};
++
++        const std::vector<AudioProfile> leAudioInputProfiles = {
++                createProfile(PcmType::INT_16_BIT,
++                              {AudioChannelLayout::LAYOUT_MONO,
++                               AudioChannelLayout::LAYOUT_STEREO},
++                              {8000, 16000, 24000, 32000, 44100, 48000})};
++
+         Configuration c;
+
+         // Device ports
+@@ -669,6 +682,30 @@ std::unique_ptr<Configuration> getBluetoothConfiguration() {
+         c.ports.push_back(btOutHearingAid);
+         c.connectedProfiles[btOutHearingAid.id] = hearingAidAudioProfiles;
+
++        AudioPort bleOutHeadset =
++                createPort(c.nextPortId++, "BLE Headset Out", 0, false,
++                           createDeviceExt(AudioDeviceType::OUT_HEADSET, 0,
++                                           AudioDeviceDescription::CONNECTION_BT_LE));
++        bleOutHeadset.profiles = leAudioOutputProfiles;
++        c.ports.push_back(bleOutHeadset);
++        c.connectedProfiles[bleOutHeadset.id] = leAudioOutputProfiles;
++
++        AudioPort bleOutSpeaker =
++                createPort(c.nextPortId++, "BLE Speaker Out", 0, false,
++                           createDeviceExt(AudioDeviceType::OUT_SPEAKER, 0,
++                                           AudioDeviceDescription::CONNECTION_BT_LE));
++        bleOutSpeaker.profiles = leAudioOutputProfiles;
++        c.ports.push_back(bleOutSpeaker);
++        c.connectedProfiles[bleOutSpeaker.id] = leAudioOutputProfiles;
++
++        AudioPort bleInHeadset =
++                createPort(c.nextPortId++, "BLE Headset In", 0, true,
++                           createDeviceExt(AudioDeviceType::IN_HEADSET, 0,
++                                           AudioDeviceDescription::CONNECTION_BT_LE));
++        bleInHeadset.profiles = leAudioInputProfiles;
++        c.ports.push_back(bleInHeadset);
++        c.connectedProfiles[bleInHeadset.id] = leAudioInputProfiles;
++
+         // Mix ports
+         AudioPort btOutMix =
+                 createPort(c.nextPortId++, "a2dp output", 0, false, createPortMixExt(1, 1));
+@@ -679,11 +716,27 @@ std::unique_ptr<Configuration> getBluetoothConfiguration() {
+         btHearingOutMix.profiles = hearingAidAudioProfiles;
+         c.ports.push_back(btHearingOutMix);
+
++        AudioPort leOutMix =
++                createPort(c.nextPortId++, "le audio output", 0, false,
++                           createPortMixExt(1, 1));
++        leOutMix.profiles = leAudioOutputProfiles;
++        c.ports.push_back(leOutMix);
++
++        AudioPort leInMix =
++                createPort(c.nextPortId++, "le audio input", 0, true,
++                           createPortMixExt(1, 1));
++        leInMix.profiles = leAudioInputProfiles;
++        c.ports.push_back(leInMix);
++
+         c.routes.push_back(createRoute({btOutMix}, btOutDevice));
+         c.routes.push_back(createRoute({btOutMix}, btOutHeadphone));
+         c.routes.push_back(createRoute({btOutMix}, btOutSpeaker));
+         c.routes.push_back(createRoute({btHearingOutMix}, btOutHearingAid));
+
++        c.routes.push_back(createRoute({leOutMix}, bleOutHeadset));
++        c.routes.push_back(createRoute({leOutMix}, bleOutSpeaker));
++        c.routes.push_back(createRoute({bleInHeadset}, leInMix));
++
+         return c;
+     }();
+     return std::make_unique<Configuration>(configuration);

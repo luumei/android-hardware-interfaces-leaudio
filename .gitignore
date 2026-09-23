@@ -10,3 +10,4 @@ bluetooth.audio.core.service
 *.o
 *.a
 Android.bp.bak
+android.hardware.bluetooth.audio_sw.so
