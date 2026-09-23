@@ -530,3 +530,86 @@ left/right microphone PCM streams are actually distinct
 
 The current production firmware cannot validate these final steps because the
 Bluetooth Audio Core plugin and VINTF instance are absent.
+
+## Suggested vendor build integration
+
+This repository contains a minimal example integration for a vendor/test build.
+
+Files:
+
+~~~text
+integration/pixel-watch-4/Android.bp
+integration/pixel-watch-4/device.mk.example
+integration/pixel-watch-4/manifest_bluetooth_audio_core.xml
+~~~
+
+The intended build integration is:
+
+~~~text
+PRODUCT_PACKAGES += android.hardware.bluetooth.audio_sw
+~~~
+
+plus the VINTF fragment declaring:
+
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
+
+The plugin is expected to install into the vendor library namespace and be
+loaded by the Qualcomm `btaudio_sw` hook already present in:
+
+~~~text
+/vendor/etc/audio/sku_monaco/vendor_audio_interfaces.xml
+~~~
+
+The plugin emits diagnostic log messages prefixed with:
+
+~~~text
+LeAudioBridge:
+~~~
+
+so an integrated build can verify whether:
+
+~~~text
+registerIModuleBluetoothSWQti()
+configuration creation
+ModuleBluetooth creation
+service registration
+~~~
+
+succeed or fail.
+
+### Dependency verification
+
+Run:
+
+~~~bash
+scripts/check_plugin_dependencies.sh android.hardware.bluetooth.audio_sw.so
+~~~
+
+to verify:
+
+- ARM architecture
+- exported Qualcomm entry point
+- DT_NEEDED dependencies
+- embedded BLE Audio Core port strings
+- SHA256
+
+### Runtime verification
+
+On Windows with ADB:
+
+~~~powershell
+powershell -ExecutionPolicy Bypass -File integration/pixel-watch-4/test_runtime.ps1
+~~~
+
+A successful integration should show:
+
+~~~text
+android.hardware.audio.core.IModule/bluetooth
+~~~
+
+in the service list and BLE headset input/output ports in AudioPolicy.
+
+The final stereo test must still verify that two advertised input channels
+correspond to distinct left/right microphone PCM and are not duplicated mono.

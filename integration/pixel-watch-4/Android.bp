@@ -1,0 +1,35 @@
+cc_library_shared {
+    name: "android.hardware.bluetooth.audio_sw",
+    vendor: true,
+
+    srcs: [
+        "../../plugin/src/register.cpp",
+    ],
+
+    shared_libs: [
+        "android.hardware.audio.core-V4-ndk",
+        "libaudio_aidl_conversion_common_ndk",
+        "libaudioaidlcommon",
+        "libaudioutils",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "liblog",
+        "libmedia_helper",
+        "libstagefright_foundation",
+        "libutils",
+        "libxml2",
+    ],
+
+    static_libs: [
+        "libaudioserviceexampleimpl",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+    ],
+
+    relative_install_path: "hw",
+}

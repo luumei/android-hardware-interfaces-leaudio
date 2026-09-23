@@ -1,0 +1,7 @@
+# Pixel Watch 4 / Qualcomm vendor integration example
+
+PRODUCT_PACKAGES += \
+    android.hardware.bluetooth.audio_sw
+
+DEVICE_MANIFEST_FILE += \
+    vendor/bluetoothaudio/android-bluetooth-audio-core-hal/integration/pixel-watch-4/manifest_bluetooth_audio_core.xml
